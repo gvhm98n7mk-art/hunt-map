@@ -30,8 +30,8 @@ async function loadGMU(num){
   try{
     if(S.cache[num]){ Object.assign(S,S.cache[num]); drawLayers(); map.fitBounds(L.geoJSON(S.gmu).getBounds()); renderAll(); say(`<b>${num} ${GMUS[num].name}</b> ready`); return; }
     say(`Loading GMU ${num} boundary…`); const gmu=await Data.gmu(num); S.gmu=gmu; map.fitBounds(L.geoJSON(gmu).getBounds());
-    say('Loading public land, harvest units, roads…');
-    const [dnr,pad,cuts,osm,dnrRoads]=await Promise.all([Data.dnr(gmu),Data.pad(gmu),Data.cuts(gmu),Data.osm(gmu),Data.dnrRoads(gmu).catch(e=>{console.warn('DNR roads',e);return [];})]);
+    say('Loading public land, harvest units, roads…'); S.osmErr=null;
+    const [dnr,pad,cuts,osm,dnrRoads]=await Promise.all([Data.dnr(gmu),Data.pad(gmu),Data.cuts(gmu),Data.osm(gmu).catch(e=>{console.warn('OSM',e);S.osmErr=e.message;return {roads:[],gates:[],rivers:[]};}),Data.dnrRoads(gmu).catch(e=>{console.warn('DNR roads',e);return [];})]);
     // DNR is the primary road source (every forest road incl. private timber spurs); OSM fills highways, county roads and trails, or everything if DNR is down.
     const roads=dnrRoads.length?[...osm.roads.filter(r=>/hwy|county|trail/.test(r.cls)),...dnrRoads]:osm.roads;
     S.layers={public:[...dnr,...pad.filter(f=>f.properties.access==='open')],dnr,pad,cuts,...osm,roads,roadSrc:dnrRoads.length?'DNR':'OSM'};
@@ -41,7 +41,7 @@ async function loadGMU(num){
     say('Computing slope, aspect, benches…'); await tick(); S.terr=Terrain.derive(grid,S.elev);
     say('Building pressure and habitat rasters…'); await tick(); S.model=new Model(grid,S.terr,S.layers);
     drawRoads(); S.cache[num]={gmu:S.gmu,layers:S.layers,grid:S.grid,elev:S.elev,terr:S.terr,model:S.model};
-    say(`<b>${num} ${GMUS[num].name}</b> ready · ${S.layers.roads.length} road segments (${S.layers.roadSrc}) · ${cuts.length} harvest units · ${osm.gates.length} gates`);
+    say(`<b>${num} ${GMUS[num].name}</b> ready · ${S.layers.roads.length} road segments (${S.layers.roadSrc}) · ${cuts.length} harvest units · ${osm.gates.length} gates${S.osmErr?' · <span style="color:var(--bad)">OSM down: no trails/gates/rivers this load</span>':''}`);
     renderAll();
   }catch(e){ say(`<b style="color:var(--bad)">Error:</b> ${e.message}`); console.error(e); }
 }

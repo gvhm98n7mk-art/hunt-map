@@ -5,7 +5,7 @@ const SVC = {
   pad: "https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/Manager_Name_PADUS/FeatureServer/0",
   fpa: "https://gis.dnr.wa.gov/site2/rest/services/Public_Forest_Practices/Forest_Practices_Applications_offline/FeatureServer/6",
   dnrRoads: "https://gis.dnr.wa.gov/site2/rest/services/Public_Forest_Practices/WADNR_PUBLIC_FP_Trans/FeatureServer/2",
-  overpass: "https://overpass-api.de/api/interpreter",
+  overpass: ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://overpass.private.coffee/api/interpreter"],
   dem: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 };
 const Geo = {
@@ -78,8 +78,9 @@ const Data = {
   async osm(gmu){
     const [W,S,E,N]=gmu.bbox; const bb=`${S},${W},${N},${E}`;
     const q=`[out:json][timeout:150];(way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|service|track|path)$"](${bb});node["barrier"~"^(gate|lift_gate|swing_gate|bollard|block|debris)$"](${bb});way["waterway"="river"](${bb}););out body geom qt;`;
-    const r=await fetch(SVC.overpass,{method:'POST',body:'data='+encodeURIComponent(q)}); if(!r.ok) throw new Error('Overpass '+r.status);
-    const j=await r.json(); const gateIds=new Set(), gates=[], roads=[], rivers=[];
+    let j=null,err='';
+    for(const u of SVC.overpass){ try{ const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q)}); if(r.ok){ j=await r.json(); break; } err='Overpass '+r.status; }catch(e){ err=e.message; } }
+    if(!j) throw new Error(err||'Overpass unavailable'); const gateIds=new Set(), gates=[], roads=[], rivers=[];
     for(const e of j.elements) if(e.type==='node'){ gateIds.add(e.id); gates.push([e.lat,e.lon]); }
     for(const e of j.elements){ if(e.type!=='way') continue; const t=e.tags||{}; const ll=e.geometry.map(p=>[p.lat,p.lon]);
       if(t.waterway){ rivers.push(ll); continue; }
