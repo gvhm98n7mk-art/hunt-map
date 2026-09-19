@@ -58,12 +58,13 @@
     <div class="row"><input type="checkbox" id="ov-cuts"><span class="sw" style="background:#e6a23c"></span><label for="ov-cuts">Harvest units by age</label></div>
     <div class="row"><input type="checkbox" id="ov-pins" checked><span class="sw" style="background:#d9631e;border-radius:50%"></span><label for="ov-pins">My pins</label></div>
     <div class="legend">
-      <span class="sw line" style="background:#7a1f0c"></span><span>Highway / county road (heavy traffic)</span>
-      <span class="sw line" style="background:#2b6cb0"></span><span>Mainline (drivable, moderate)</span>
-      <span class="sw line" style="background:#6aa0d8"></span><span>Spur (drivable, light)</span>
-      <span class="sw line" style="background:#c98a1a"></span><span>Gated / forestry (walk or bike)</span>
-      <span class="sw line" style="background:#8a8a8a"></span><span>Closed / private</span>
-      <span class="sw line" style="background:#6b5b95"></span><span>Trail</span>
+      <span class="sw line" style="background:#b3261e"></span><span>Highway / county road (heavy traffic)</span>
+      <span class="sw line" style="background:#1f5fbf"></span><span>Mainline, open to vehicles</span>
+      <span class="sw line" style="background:#3d8fe0"></span><span>Spur, open to vehicles</span>
+      <span class="sw line" style="background:repeating-linear-gradient(90deg,#e08a00 0 7px,transparent 7px 11px)"></span><span>Gated or private: walk / bike</span>
+      <span class="sw line" style="background:repeating-linear-gradient(90deg,#6b6b6b 0 2px,transparent 2px 7px)"></span><span>Abandoned / closed: walk only</span>
+      <span class="sw line" style="background:repeating-linear-gradient(90deg,#7b4fb8 0 1px,transparent 1px 5px)"></span><span>Trail</span>
+      <span></span><span class="hint">Roads: WA DNR road inventory (all forest roads) + OpenStreetMap highways and trails. Tap a road for status and access.</span>
     </div>
     <div class="hint" style="margin-top:10px">Model: security (slope 25–45°, timber cover, ≥0.5 mi from drivable roads, low pressure) × nearby food (harvest units by age) × water (rivers, valley bottoms). Pressure = road class × distance × season day. Harvest ages come from DNR permit approval dates: treat as ±1 yr.</div>
   </div>

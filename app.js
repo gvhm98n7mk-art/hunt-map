@@ -17,7 +17,9 @@ const OV={hill:L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services
 const planLayer=L.layerGroup().addTo(map); let heatLayer=null; let heatKind='score';
 Object.entries(OV).forEach(([k,l])=>{const cb=$('#ov-'+k); if(cb.checked)l.addTo(map); cb.onchange=()=>cb.checked?l.addTo(map):map.removeLayer(l);});
 [['score','Combined score'],['sec','Security'],['pressure','Pressure'],['food','Food'],['none','Off']].forEach(([k,n])=>{const b=document.createElement('button');b.className='chip';b.dataset.h=k;b.textContent=n;b.setAttribute('aria-pressed',k===heatKind);b.onclick=()=>{heatKind=k;$$('#heats .chip').forEach(c=>c.setAttribute('aria-pressed',c.dataset.h===k));drawHeat();};$('#heats').appendChild(b);});
-const ROAD_COL={hwy:'#7a1f0c',county:'#7a1f0c',mainline:'#2b6cb0',spur:'#6aa0d8',gated:'#c98a1a',closed:'#8a8a8a',trail:'#6b5b95'};
+const ROAD_COL={hwy:'#b3261e',county:'#b3261e',mainline:'#1f5fbf',spur:'#3d8fe0',gated:'#e08a00',closed:'#6b6b6b',trail:'#7b4fb8'};
+const ROAD_STYLE={hwy:{w:3.2},county:{w:2.8},mainline:{w:2.6},spur:{w:2},gated:{w:2.2,dash:'7 4'},closed:{w:1.6,dash:'2 5'},trail:{w:1.8,dash:'1 4'}};
+const roadRenderer=L.canvas({pane:'lines',padding:.3,tolerance:6});
 // ---- header ----
 function fillGMUs(){ const sel=$('#gmuSel'); const mine=CONFIG.MY_GMUS; const og1=document.createElement('optgroup');og1.label='My units'; mine.forEach(n=>{const o=new Option(`${n} ${GMUS[n]?.name||''}`,n);og1.appendChild(o);}); sel.appendChild(og1);
   const og2=document.createElement('optgroup');og2.label='All units'; Object.keys(GMUS).map(Number).sort((a,b)=>a-b).filter(n=>!mine.includes(n)).forEach(n=>og2.appendChild(new Option(`${n} ${GMUS[n].name}`,n))); sel.appendChild(og2);
@@ -29,25 +31,41 @@ async function loadGMU(num){
     if(S.cache[num]){ Object.assign(S,S.cache[num]); drawLayers(); map.fitBounds(L.geoJSON(S.gmu).getBounds()); renderAll(); say(`<b>${num} ${GMUS[num].name}</b> ready`); return; }
     say(`Loading GMU ${num} boundary…`); const gmu=await Data.gmu(num); S.gmu=gmu; map.fitBounds(L.geoJSON(gmu).getBounds());
     say('Loading public land, harvest units, roads…');
-    const [dnr,pad,cuts,osm]=await Promise.all([Data.dnr(gmu),Data.pad(gmu),Data.cuts(gmu),Data.osm(gmu)]);
-    S.layers={public:[...dnr,...pad.filter(f=>f.properties.access==='open')],dnr,pad,cuts,...osm};
+    const [dnr,pad,cuts,osm,dnrRoads]=await Promise.all([Data.dnr(gmu),Data.pad(gmu),Data.cuts(gmu),Data.osm(gmu),Data.dnrRoads(gmu).catch(e=>{console.warn('DNR roads',e);return [];})]);
+    // DNR is the primary road source (every forest road incl. private timber spurs); OSM fills highways, county roads and trails, or everything if DNR is down.
+    const roads=dnrRoads.length?[...osm.roads.filter(r=>/hwy|county|trail/.test(r.cls)),...dnrRoads]:osm.roads;
+    S.layers={public:[...dnr,...pad.filter(f=>f.properties.access==='open')],dnr,pad,cuts,...osm,roads,roadSrc:dnrRoads.length?'DNR':'OSM'};
     drawLayers(); renderRegs(); renderDays();
     const grid=Grid.forBbox(gmu.bbox,CONFIG.DEM_ZOOM); S.grid=grid;
     say(`Loading terrain (${grid.W/256}×${grid.H/256} tiles)…`); S.elev=await Terrain.load(grid,(d,n)=>say(`Terrain ${d}/${n}`)); S.layers.elev=S.elev;
     say('Computing slope, aspect, benches…'); await tick(); S.terr=Terrain.derive(grid,S.elev);
     say('Building pressure and habitat rasters…'); await tick(); S.model=new Model(grid,S.terr,S.layers);
-    S.cache[num]={gmu:S.gmu,layers:S.layers,grid:S.grid,elev:S.elev,terr:S.terr,model:S.model};
-    say(`<b>${num} ${GMUS[num].name}</b> ready · ${cuts.length} harvest units · ${dnr.length} DNR parcels · ${osm.gates.length} gates`);
+    drawRoads(); S.cache[num]={gmu:S.gmu,layers:S.layers,grid:S.grid,elev:S.elev,terr:S.terr,model:S.model};
+    say(`<b>${num} ${GMUS[num].name}</b> ready · ${S.layers.roads.length} road segments (${S.layers.roadSrc}) · ${cuts.length} harvest units · ${osm.gates.length} gates`);
     renderAll();
   }catch(e){ say(`<b style="color:var(--bad)">Error:</b> ${e.message}`); console.error(e); }
 }
 const tick=()=>new Promise(r=>setTimeout(r,30));
+const ROAD_LABEL={hwy:'Highway',county:'County / state road',mainline:'Mainline, open to vehicles',spur:'Spur, open to vehicles',gated:'Gated or private: walk / bike',closed:'Abandoned / closed: walk only',trail:'Trail',unknown:'Unknown access'};
+function drawRoads(){ // one merged layer per class: fast even with 16k segments
+  OV.roads.clearLayers(); const by={};
+  for(const r of S.layers.roads){ const c=r.cls==='unknown'?'gated':r.cls; (by[c]=by[c]||[]).push(r.ll); }
+  for(const c of ['closed','trail','gated','spur','mainline','county','hwy']){ if(!by[c]) continue; const st=ROAD_STYLE[c];
+    L.polyline(by[c],{renderer:roadRenderer,color:'#fff',weight:st.w+2.2,opacity:.75,interactive:false}).addTo(OV.roads);
+    L.polyline(by[c],{renderer:roadRenderer,color:ROAD_COL[c],weight:st.w,opacity:1,dashArray:st.dash,interactive:false}).addTo(OV.roads); }
+}
+function nearestRoad(ll,maxPx=10){ // pixel-space nearest segment for tap-to-identify
+  const p=map.latLngToContainerPoint(ll); let best=null,bd=maxPx*maxPx; const b=map.getBounds().pad(.05);
+  for(const r of S.layers?.roads||[]){ for(let i=1;i<r.ll.length;i++){ const a=r.ll[i-1],c=r.ll[i]; if(!b.contains(a)&&!b.contains(c)) continue;
+    const A=map.latLngToContainerPoint(a),C=map.latLngToContainerPoint(c); const dx=C.x-A.x,dy=C.y-A.y; const t=Math.max(0,Math.min(1,((p.x-A.x)*dx+(p.y-A.y)*dy)/(dx*dx+dy*dy||1)));
+    const ex=A.x+t*dx-p.x, ey=A.y+t*dy-p.y, d=ex*ex+ey*ey; if(d<bd){bd=d;best=r;} } }
+  return best; }
 function drawLayers(){
   Object.values(OV).forEach(l=>{ if(l instanceof L.LayerGroup) l.clearLayers(); });
   const Ly=S.layers; L.geoJSON(S.gmu,{pane:'lines',style:{color:'#111',weight:2.5,fill:false,dashArray:'6 4'},interactive:false}).addTo(OV.gmu);
   L.geoJSON({type:'FeatureCollection',features:Ly.dnr},{pane:'land',style:{color:'#2f7d4f',weight:.7,fillColor:'#2f7d4f',fillOpacity:.25},onEachFeature:(f,l)=>l.bindPopup('<b>DNR state trust land</b><br>Open walk-in. Discover Pass at developed sites.')}).addTo(OV.public);
   L.geoJSON({type:'FeatureCollection',features:Ly.pad},{pane:'land',style:f=>({color:'#3a7ca5',weight:.7,fillColor:'#3a7ca5',fillOpacity:f.properties.access==='open'?.25:.1}),onEachFeature:(f,l)=>l.bindPopup(`<b>${f.properties.Unit_Nm||'Public land'}</b><br>${f.properties.owner} · ${f.properties.access}`)}).addTo(OV.public);
-  for(const r of Ly.roads) L.polyline(r.ll,{pane:'lines',color:ROAD_COL[r.cls],weight:/hwy|county|mainline/.test(r.cls)?2.2:1.5,opacity:.9}).bindPopup(`<b>${r.name||r.cls}</b><br>class: ${r.cls} (traffic weight ${ROAD_W[r.cls]})${r.surface?' · '+r.surface:''}${r.hasGate?' · gate on this segment':''}`).addTo(OV.roads);
+  drawRoads();
   for(const g of Ly.gates) L.marker(g,{pane:'lines',icon:L.divIcon({className:'',html:'<div class="gate"></div>',iconSize:[10,10]})}).bindPopup('<b>Gate</b><br>Walk-in beyond here unless posted otherwise').addTo(OV.gates);
   for(const ll of Ly.rivers) L.polyline(ll,{pane:'lines',color:'#3b82c4',weight:2,opacity:.8,interactive:false}).addTo(OV.rivers);
   const yr=+$('#date').value.slice(0,4);
@@ -99,7 +117,7 @@ async function renderDays(){ await Cal.load(); const g=S.gmuNum; const days=Cal.
 // ---- pins & log ----
 const KINDS=[['sign','#d9631e'],['bed','#7a1f0c'],['wallow','#3b82c4'],['sighting','#2f7d4f'],['kill','#111'],['camp','#6b5b95'],['glass','#b8860b'],['gate','#8a8a8a']];
 KINDS.forEach(([k,c])=>{const b=document.createElement('button');b.className='chip';b.dataset.k=k;b.innerHTML=`<span class="sw" style="background:${c};border-radius:50%;width:9px;height:9px"></span> ${k}`;b.onclick=()=>{S.pinKind=S.pinKind===k?null:k;$$('#pinKinds .chip').forEach(x=>x.setAttribute('aria-pressed',x.dataset.k===S.pinKind));map.getContainer().style.cursor=S.pinKind?'crosshair':'';};$('#pinKinds').appendChild(b);});
-map.on('click',async e=>{ if(!S.pinKind) return; const note=prompt(`${S.pinKind} note (optional)`)||''; const p=await Store.add('pins',{gmu:S.gmuNum,kind:S.pinKind,note,lat:+e.latlng.lat.toFixed(6),lng:+e.latlng.lng.toFixed(6),date:$('#date').value}); S.pins.unshift(p); drawPins(); renderPins(); });
+map.on('click',async e=>{ if(!S.pinKind){ if(!$('#ov-roads').checked) return; const r=nearestRoad(e.latlng); if(r) L.popup().setLatLng(e.latlng).setContent(`<b>${r.name||'Unnamed road'}</b><br>${ROAD_LABEL[r.cls]}<br><small>${[r.src,r.status,r.access,r.control,r.surface].filter(v=>v&&v!=='Unknown').join(' · ')||r.src}</small>`).openOn(map); return; } const note=prompt(`${S.pinKind} note (optional)`)||''; const p=await Store.add('pins',{gmu:S.gmuNum,kind:S.pinKind,note,lat:+e.latlng.lat.toFixed(6),lng:+e.latlng.lng.toFixed(6),date:$('#date').value}); S.pins.unshift(p); drawPins(); renderPins(); });
 function drawPins(){ OV.pins.clearLayers(); for(const p of S.pins){ if(p.gmu!==S.gmuNum) continue; const c=Object.fromEntries(KINDS)[p.kind]||'#d9631e'; L.marker([p.lat,p.lng],{pane:'pins',icon:L.divIcon({className:'',html:`<div class="pinIcon" style="background:${c}"></div>`,iconSize:[14,14],iconAnchor:[7,7]})}).bindPopup(`<b>${p.kind}</b> ${p.note||''}<br><small>${(p.date||p.created_at).slice(0,10)}</small>`).addTo(OV.pins); } }
 function renderPins(){ const el=$('#pinList'); const mine=S.pins.filter(p=>p.gmu===S.gmuNum); el.innerHTML=mine.length?mine.map(p=>`<div class="item"><span><b>${p.kind}</b> ${p.note||''} <small>${(p.date||p.created_at).slice(0,10)}</small></span><span><button data-go="${p.id}">go</button> <button data-del="${p.id}">✕</button></span></div>`).join(''):'<div class="hint">No pins in this unit yet.</div>';
   $$('#pinList [data-go]').forEach(b=>b.onclick=()=>{const p=S.pins.find(x=>x.id===b.dataset.go);map.setView([p.lat,p.lng],15);}); $$('#pinList [data-del]').forEach(b=>b.onclick=async()=>{await Store.remove('pins',b.dataset.del);S.pins=S.pins.filter(x=>x.id!==b.dataset.del);drawPins();renderPins();}); }

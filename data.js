@@ -4,6 +4,7 @@ const SVC = {
   dnr: "https://gis.dnr.wa.gov/site3/rest/services/Public_Boundaries/WADNR_PUBLIC_Cadastre_OpenData/MapServer/6",
   pad: "https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/Manager_Name_PADUS/FeatureServer/0",
   fpa: "https://gis.dnr.wa.gov/site2/rest/services/Public_Forest_Practices/Forest_Practices_Applications_offline/FeatureServer/6",
+  dnrRoads: "https://gis.dnr.wa.gov/site2/rest/services/Public_Forest_Practices/WADNR_PUBLIC_FP_Trans/FeatureServer/2",
   overpass: "https://overpass-api.de/api/interpreter",
   dem: "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 };
@@ -26,6 +27,28 @@ async function arcAll(base, where, bbox, outFields, extra=''){
   }
   return feats;
 }
+async function arcAllParallel(base, where, bbox, outFields, offset='0.0001'){
+  const env=`geometry=${bbox.join(',')}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outSR=4326`;
+  const c=await (await fetch(`${base}/query?where=${encodeURIComponent(where)}&${env}&returnCountOnly=true&f=json`)).json();
+  const n=c.count||0, pages=Math.ceil(n/1000); let feats=[];
+  for(let p=0;p<pages;p+=4){
+    const batch=[]; for(let q=p;q<Math.min(pages,p+4);q++) batch.push(fetch(`${base}/query?where=${encodeURIComponent(where)}&${env}&outFields=${outFields}&f=geojson&maxAllowableOffset=${offset}&resultOffset=${q*1000}&resultRecordCount=1000&orderByFields=OBJECTID`).then(r=>r.json()));
+    for(const j of await Promise.all(batch)) feats=feats.concat(j.features||[]);
+  }
+  return feats;
+}
+// DNR road status/access/control -> pressure class
+function dnrRoadClass(a){
+  const st=a.ROAD_STATUS_LBL||'', acc=a.ROAD_PUBLIC_ACCESS_LBL||'', ctl=a.ROAD_CONTROL_LBL||'', cls=a.ROAD_DNR_CLASS_LBL||'', usgs=a.ROAD_USGS_CLASS_LBL||'';
+  if(/Planned/.test(st)) return null;
+  if(/Abandon|Decommission|Orphan|Closed/.test(st) || /Not Driveable/.test(acc)) return 'closed';
+  if(/Primary|Secondary/.test(usgs)) return 'hwy';
+  if(/DOT|County|City/.test(ctl)) return 'county';
+  if(/Gated|Management/.test(acc) || /Private/.test(ctl)) return 'gated';
+  if(!/DNR|BPA|Parks/.test(ctl) && !/Year-Round/.test(acc)) return 'unknown'; // private timber road DNR only has as a line; resolved by land owner in Model.build
+  if(/Mainline/.test(cls)) return 'mainline';
+  return 'spur';
+}
 const Data = {
   async gmu(num){
     const j=await (await fetch(`${SVC.gmu}/query?where=GMU_Num%3D${num}&outFields=GMU_Num,GMU_Name,EastWest_Ind&returnGeometry=true&outSR=4326&f=geojson&maxAllowableOffset=0.0003`)).json();
@@ -42,6 +65,14 @@ const Data = {
   async cuts(gmu){
     const f=await arcAll(SVC.fpa,"TIMHARV_FP_TY_LABEL_NM LIKE 'Even%' AND DECISION IN ('Approved','Expired','Renewed','Closed') AND EFFECTIVE_DT > DATE '2004-01-01'",gmu.bbox,"FP_ID,EFFECTIVE_DT,TIMHARV_RPT_AREA,TIMHARV_FP_TY_LABEL_NM,DECISION");
     return f.flatMap(Geo.splitMulti).filter(x=>{const c=Geo.centroid(x.geometry);return Geo.pip(c[0],c[1],gmu.geometry)}).map(x=>(x.properties.year=new Date(x.properties.EFFECTIVE_DT).getUTCFullYear(),x));
+  },
+  async dnrRoads(gmu){
+    const f=await arcAllParallel(SVC.dnrRoads,"ROAD_STATUS_LBL<>'Planned'",gmu.bbox,"ROAD_NM,ROAD_NO,ROAD_STATUS_LBL,ROAD_PUBLIC_ACCESS_LBL,ROAD_CONTROL_LBL,ROAD_DNR_CLASS_LBL,ROAD_USGS_CLASS_LBL,ROAD_SURFACE_LBL");
+    const out=[];
+    for(const x of f){ const a=x.properties, cls=dnrRoadClass(a); if(!cls||!x.geometry) continue;
+      const lines=x.geometry.type==='LineString'?[x.geometry.coordinates]:x.geometry.type==='MultiLineString'?x.geometry.coordinates:[];
+      for(const c of lines) out.push({ll:c.map(p=>[p[1],p[0]]),cls,src:'DNR',name:a.ROAD_NM||a.ROAD_NO||'',surface:a.ROAD_SURFACE_LBL||'',access:a.ROAD_PUBLIC_ACCESS_LBL||'',control:a.ROAD_CONTROL_LBL||'',status:a.ROAD_STATUS_LBL||'',hasGate:/Gated/.test(a.ROAD_PUBLIC_ACCESS_LBL||'')}); }
+    return out;
   },
   // Roads classified for pressure. Returns {roads:[{ll,cls,tags}], gates:[[lat,lon]], rivers:[ll]}
   async osm(gmu){
@@ -61,7 +92,7 @@ const Data = {
       else if(t.highway==='tertiary'||t.highway==='residential') cls='county';
       else if(t.highway==='unclassified') cls='mainline';
       else cls='spur';
-      roads.push({ll,cls,name:t.name||t.ref||'',surface:t.surface||'',hasGate});
+      roads.push({ll,cls,src:'OSM',name:t.name||t.ref||'',surface:t.surface||'',hasGate});
     }
     return {roads,gates,rivers};
   }

@@ -20,6 +20,8 @@ class Model {
     // cuts: age raster (years since approval, 255 = none)
     this.cutYear=new Uint16Array(N); // 0 = no even-aged harvest on record
     for(const f of [...layers.cuts].sort((a,b)=>a.properties.year-b.properties.year)){ const rs=f.geometry.coordinates.map(r=>r.map(p=>grid.toIJ(p[0],p[1]))); Raster.fillPolygon(this.cutYear,W,H,rs,f.properties.year); }
+    // Unknown-owner roads: open spur if on public land, otherwise private/gated (permit or walk-in)
+    for(const r of layers.roads){ if(r.cls!=='unknown') continue; const p=r.ll[Math.floor(r.ll.length/2)]; const [i,j]=grid.toIJ(p[1],p[0]); r.cls=(i>=0&&j>=0&&i<W&&j<H&&this.pub[j*W+i])?'spur':'gated'; if(r.cls==='gated') r.control=r.control&&r.control!=='Unknown'?r.control:'Private (inferred)'; }
     // roads by pressure class, drivable vs walk
     const seeds={}; for(const c of Object.keys(ROAD_W)) seeds[c]=new Uint8Array(N);
     const drivable=new Uint8Array(N), any=new Uint8Array(N);
