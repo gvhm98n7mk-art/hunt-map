@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1f2a22">
+<title>Hunt Map</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <div class="brand">Hunt Map</div>
+  <select id="gmuSel" title="Game Management Unit"></select>
+  <input type="date" id="date" title="Hunt date">
+  <select id="species"><option value="elk">Elk</option><option value="deer">Deer</option></select>
+  <select id="weapon"><option value="">Any weapon</option><option value="archery">Archery</option><option value="muzzleloader">Muzzleloader</option><option value="modern">Modern</option></select>
+  <div class="status" id="status">Loading…</div>
+  <button id="acct" class="ghost">Local</button>
+</header>
+<main>
+<aside>
+  <nav role="tablist">
+    <button role="tab" aria-selected="true" data-tab="plan">Plan</button>
+    <button role="tab" aria-selected="false" data-tab="layers">Layers</button>
+    <button role="tab" aria-selected="false" data-tab="log">Log</button>
+    <button role="tab" aria-selected="false" data-tab="days">Days</button>
+    <button role="tab" aria-selected="false" data-tab="regs">Regs</button>
+  </nav>
+  <div class="pane" id="tab-plan">
+    <div id="openNow" class="note"></div>
+    <div class="grid2">
+      <label>Hours <select id="hours"><option value="am">Morning</option><option value="pm">Evening</option><option value="all" selected>All day</option></select></label>
+      <label>Max walk from truck <select id="walk"><option value="1.5">1.5 mi</option><option value="3" selected>3 mi</option><option value="5">5 mi</option><option value="8">8 mi</option></select></label>
+      <label>Pressure <select id="pressure"><option value="auto" selected>Auto (season + weekday)</option><option value="0.2">Low</option><option value="0.5">Medium</option><option value="1">Opener / weekend</option></select></label>
+      <label><input type="checkbox" id="useWx" checked> Use weather forecast</label>
+    </div>
+    <button id="run" class="primary">Plan my hunt</button>
+    <div id="wx" class="hint"></div>
+    <div id="results"></div>
+    <div class="row-btns"><button id="gpx" class="ghost" disabled>Export GPX (onX)</button><button id="clearPlan" class="ghost">Clear</button></div>
+  </div>
+  <div class="pane" id="tab-layers" hidden>
+    <h2>Basemap</h2><div class="chips" id="basemaps"></div>
+    <h2>Model heat layer</h2><div class="chips" id="heats"></div>
+    <div class="grad"></div><div class="legend2"><span>low</span><span>high</span></div>
+    <h2>Overlays</h2>
+    <div class="row"><input type="checkbox" id="ov-hill"><label for="ov-hill">Hillshade</label></div>
+    <div class="row"><input type="checkbox" id="ov-contour"><label for="ov-contour">Contours (USGS topo, transparent)</label></div>
+    <div class="row"><input type="checkbox" id="ov-gmu" checked><span class="sw line" style="background:#111"></span><label for="ov-gmu">GMU boundary</label></div>
+    <div class="row"><input type="checkbox" id="ov-public" checked><span class="sw" style="background:#2f7d4f"></span><label for="ov-public">Public land (DNR green, other blue)</label></div>
+    <div class="row"><input type="checkbox" id="ov-roads" checked><span class="sw line" style="background:#2b6cb0"></span><label for="ov-roads">Roads by pressure class</label></div>
+    <div class="row"><input type="checkbox" id="ov-gates" checked><span class="gate"></span><label for="ov-gates">Gates</label></div>
+    <div class="row"><input type="checkbox" id="ov-rivers" checked><span class="sw line" style="background:#3b82c4"></span><label for="ov-rivers">Rivers</label></div>
+    <div class="row"><input type="checkbox" id="ov-cuts"><span class="sw" style="background:#e6a23c"></span><label for="ov-cuts">Harvest units by age</label></div>
+    <div class="row"><input type="checkbox" id="ov-pins" checked><span class="sw" style="background:#d9631e;border-radius:50%"></span><label for="ov-pins">My pins</label></div>
+    <div class="legend">
+      <span class="sw line" style="background:#7a1f0c"></span><span>Highway / county road (heavy traffic)</span>
+      <span class="sw line" style="background:#2b6cb0"></span><span>Mainline (drivable, moderate)</span>
+      <span class="sw line" style="background:#6aa0d8"></span><span>Spur (drivable, light)</span>
+      <span class="sw line" style="background:#c98a1a"></span><span>Gated / forestry (walk or bike)</span>
+      <span class="sw line" style="background:#8a8a8a"></span><span>Closed / private</span>
+      <span class="sw line" style="background:#6b5b95"></span><span>Trail</span>
+    </div>
+    <div class="hint" style="margin-top:10px">Model: security (slope 25–45°, timber cover, ≥0.5 mi from drivable roads, low pressure) × nearby food (harvest units by age) × water (rivers, valley bottoms). Pressure = road class × distance × season day. Harvest ages come from DNR permit approval dates: treat as ±1 yr.</div>
+  </div>
+  <div class="pane" id="tab-log" hidden>
+    <h2>Add a pin</h2>
+    <div class="hint">Tap the map with a pin type selected. Pins sync when signed in.</div>
+    <div class="chips" id="pinKinds"></div>
+    <div id="pinList"></div>
+    <h2>Hunt log</h2>
+    <form id="huntForm" class="grid2">
+      <label>Date <input type="date" name="date" required></label>
+      <label>Hours <select name="hours"><option>AM</option><option>PM</option><option>All day</option></select></label>
+      <label>Species <select name="species"><option value="elk">Elk</option><option value="deer">Deer</option><option value="bear">Bear</option><option value="cougar">Cougar</option><option value="grouse">Grouse</option></select></label>
+      <label>Weapon <select name="weapon"><option>archery</option><option>muzzleloader</option><option>modern</option><option>shotgun</option></select></label>
+      <label>Saw <input name="saw" placeholder="e.g. 3 cows, 1 spike"></label>
+      <label>Harvest <input name="harvest" placeholder="none / cow elk / …"></label>
+      <label class="wide">Notes <textarea name="notes" rows="2" placeholder="where, sign, wind, what worked"></textarea></label>
+      <button class="primary wide" type="submit">Save hunt day</button>
+    </form>
+    <div id="huntList"></div>
+    <div class="row-btns"><button id="exportLog" class="ghost">Copy log for harvest report</button></div>
+  </div>
+  <div class="pane" id="tab-days" hidden></div>
+  <div class="pane" id="tab-regs" hidden></div>
+</aside>
+<div id="map"></div>
+</main>
+<dialog id="acctDlg"><form method="dialog"><h3>Sign in</h3><p class="hint">Email only, no password. You get a link; open it on the same device.</p><input type="email" id="email" placeholder="you@icloud.com" required><menu><button value="cancel" class="ghost">Cancel</button><button id="sendLink" class="primary" value="ok">Send link</button></menu></form></dialog>
+<dialog id="setDlg"><form method="dialog"><h3>Settings</h3><label>Home (for drive time)<input id="homeAddr" placeholder="address or town, e.g. Shelton, WA"></label><p class="hint" id="homeHint"></p><menu><button value="cancel" class="ghost">Cancel</button><button id="saveSet" class="primary" value="ok">Save</button></menu></form></dialog>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="regs.js"></script>
+<script src="data.js"></script>
+<script src="terrain.js"></script>
+<script src="model.js"></script>
+<script src="store.js"></script>
+<script src="plan.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
