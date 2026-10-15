@@ -9,7 +9,7 @@
 <title>Hunt Map</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-<link rel="stylesheet" href="app.css?v=20261015a">
+<link rel="stylesheet" href="app.css?v=20261015b">
 </head>
 <body>
 <header>
@@ -35,7 +35,7 @@
     <div class="grid2">
       <label>Hours <select id="hours"><option value="am">Morning</option><option value="pm">Evening</option><option value="all" selected>All day</option></select></label>
       <label>Max walk from truck <select id="walk"><option value="1.5">1.5 mi</option><option value="3" selected>3 mi</option><option value="5">5 mi</option><option value="8">8 mi</option></select></label>
-      <label>Access <select id="access"><option value="any" selected>Any walk-in</option><option value="gated">Behind a gate only</option></select></label>
+      <label>Access <select id="access"><option value="any" selected>Walk in on a road</option><option value="gated">Behind a gate only</option><option value="cross">Allow long cross-country</option></select></label>
       <label>Pressure <select id="pressure"><option value="auto" selected>Auto (season + weekday)</option><option value="0.2">Low</option><option value="0.5">Medium</option><option value="1">Opener / weekend</option></select></label>
       <label><input type="checkbox" id="useWx" checked> Use weather forecast</label>
     </div>
@@ -98,13 +98,13 @@
 <dialog id="setDlg"><form method="dialog"><h3>Settings</h3><label>Home (for drive time)<input id="homeAddr" placeholder="address or town, e.g. Shelton, WA"></label><p class="hint" id="homeHint"></p><menu><button value="cancel" class="ghost">Cancel</button><button id="saveSet" class="primary" value="ok">Save</button></menu></form></dialog>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=20261015a"></script>
-<script src="regs.js?v=20261015a"></script>
-<script src="data.js?v=20261015a"></script>
-<script src="terrain.js?v=20261015a"></script>
-<script src="model.js?v=20261015a"></script>
-<script src="store.js?v=20261015a"></script>
-<script src="plan.js?v=20261015a"></script>
-<script src="app.js?v=20261015a"></script>
+<script src="config.js?v=20261015b"></script>
+<script src="regs.js?v=20261015b"></script>
+<script src="data.js?v=20261015b"></script>
+<script src="terrain.js?v=20261015b"></script>
+<script src="model.js?v=20261015b"></script>
+<script src="store.js?v=20261015b"></script>
+<script src="plan.js?v=20261015b"></script>
+<script src="app.js?v=20261015b"></script>
 </body>
 </html>

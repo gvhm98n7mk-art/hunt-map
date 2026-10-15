@@ -171,17 +171,26 @@ class Model {
     const {W,H,m,grid}=this; const L=this.last; const B=Math.max(6,Math.round(350/m)); const bw=Math.ceil(W/B), bh=Math.ceil(H/B);
     const blocks=[]; const walkMaxM=(opts.walkMaxKm||3)*1000; const walkMaxCells=walkMaxM/m;
     const gatedOnly=opts.access==='gated'; const minRoadM=opts.minRoadM??800;
+    const freeRoam=opts.access==='cross'; const maxOffM=opts.maxOffM??(freeRoam?1200:600);
     for(let bj=0;bj<bh;bj++) for(let bi=0;bi<bw;bi++){ let best=-1,bk=-1,sum=0,cnt=0;
       for(let j=bj*B;j<Math.min(H,(bj+1)*B);j++) for(let i=bi*B;i<Math.min(W,(bi+1)*B);i++){ const k=j*W+i; if(!this.pub[k]) continue; const v=L.score[k]; sum+=v;cnt++; if(v>best){best=v;bk=k;} }
       if(cnt<B*B*.3||bk<0) continue; if(this.dAny[bk]>walkMaxCells) continue; blocks.push({k:bk,v:best*.6+ (sum/cnt)*.4}); }
     blocks.sort((a,b)=>b.v-a.v); const picked=[]; const sup=Math.round(900/m);
-    for(const b of blocks){ const i=b.k%W,j=(b.k-i)/W; if(picked.some(p=>Math.hypot(p.i-i,p.j-j)<sup)) continue; picked.push({i,j,k:b.k,v:b.v}); if(picked.length>=n*5) break; }
+    for(const b of blocks){ const i=b.k%W,j=(b.k-i)/W; if(picked.some(p=>Math.hypot(p.i-i,p.j-j)<sup)) continue; picked.push({i,j,k:b.k,v:b.v}); if(picked.length>=Math.max(300,n*25)) break; }
     const sp=SPECIES[L.opts.species]; const fr=Math.round(sp.foodR/m); const out=[];
+    // Route every candidate first, then rank on habitat AND how you get in. A great bed you reach by
+    // fighting a mile of blowdown is worth less than a good bed at the end of a gated road.
+    const cands=[];
     for(const p of picked){
-      if(out.length>=n) break;
-      const rt=this.routeTo(p.i,p.j,Math.min(1200,walkMaxM));
+      const rt=this.routeTo(p.i,p.j,Math.min(maxOffM,walkMaxM));
       if(!rt||rt.totalM>walkMaxM) continue;                       // no legal walk-in inside the cap
       if(gatedOnly&&(rt.roadM<minRoadM||!/gated|closed/.test(rt.classes[0]||''))) continue;
+      const accessFit=freeRoam?1:Math.exp(-rt.offM/450);
+      cands.push({p,rt,rank:p.v*(.35+.65*accessFit),accessFit});
+    }
+    cands.sort((a,b)=>b.rank-a.rank);
+    for(const c of cands.slice(0,n)){
+      const p=c.p, rt=c.rt;
       let fbest=0,fk=-1; for(let j=Math.max(0,p.j-fr);j<Math.min(H,p.j+fr);j+=2) for(let i=Math.max(0,p.i-fr);i<Math.min(W,p.i+fr);i+=2){ const k=j*W+i; if(L.food[k]>fbest){fbest=L.food[k];fk=k;} }
       const ll=grid.toLL(p.i,p.j); const fll=fk>=0?grid.toLL(fk%W,(fk-fk%W)/W):null;
       out.push({ rank:out.length+1, score:Math.round(p.v*100), bed:[ll[1],ll[0]], food:fll?[fll[1],fll[0]]:null, foodFit:Math.round(fbest*100),
@@ -190,7 +199,7 @@ class Model {
         pressure:Math.round(this.pressure[p.k]*100), sec:Math.round(L.sec[p.k]*100),
         park:rt.park, route:rt.path, leave:rt.leave,
         walkKm:+(rt.totalM/1000).toFixed(2), roadWalkKm:+(rt.roadM/1000).toFixed(2), offM:Math.round(rt.offM),
-        access:rt.classes[0]||'road', accessName:rt.names[0]||'' });
+        access:rt.classes[0]||'road', accessName:rt.names[0]||'', accessFit:Math.round(c.accessFit*100) });
     }
     return out;
   }

@@ -81,7 +81,7 @@ async function runPlan(){
   const c=Geo.centroid(S.gmu.geometry); S.wx=$('#useWx').checked?await Weather.forecast(c[1],c[0],$('#date').value):null;
   $('#wx').textContent=S.wx?`Forecast ${$('#date').value}: ${Math.round(S.wx.tmin)}–${Math.round(S.wx.tmax)}°F, ${S.wx.rain}" rain, wind ${Math.round(S.wx.wind)} mph. Sunrise ${S.wx.sunrise}, sunset ${S.wx.sunset}.`:'No forecast (date beyond 16 days or weather off): using mild, dry defaults.';
   say('Scoring…'); await tick(); const o=planOpts(); S.model.score(o);
-  S.spots=S.model.hotspots(12,{walkMaxKm:+$('#walk').value*1.609,access:$('#access').value}); drawHeat(); drawSpots(); renderResults(o); $('#gpx').disabled=!S.spots.length; btn.disabled=false;
+  S.spots=S.model.hotspots(12,{walkMaxKm:+$('#walk').value*1.609,access:$('#access').value,maxOffM:+$('#access').dataset.off||undefined}); drawHeat(); drawSpots(); renderResults(o); $('#gpx').disabled=!S.spots.length; btn.disabled=false;
   say(`<b>${S.gmuNum}</b> plan: pressure ${Math.round(o.pressureDay*100)}%, rut ${Math.round(S.model.last.rut*100)}%`);
 }
 function drawHeat(){ if(heatLayer){map.removeLayer(heatLayer);heatLayer=null;} if(!S.model?.last||heatKind==='none') return; const cv=S.model.paint(heatKind); heatLayer=L.imageOverlay(cv.toDataURL(),S.grid.bounds(),{opacity:.75,pane:'heat',interactive:false}).addTo(map); }
