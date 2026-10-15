@@ -172,11 +172,12 @@ class Model {
     const blocks=[]; const walkMaxM=(opts.walkMaxKm||3)*1000; const walkMaxCells=walkMaxM/m;
     const gatedOnly=opts.access==='gated'; const minRoadM=opts.minRoadM??800;
     const freeRoam=opts.access==='cross'; const maxOffM=opts.maxOffM??(freeRoam?1200:600);
+    const minWalkM=(opts.minWalkKm||0)*1000;   // how far in you insist on going before you hunt
     for(let bj=0;bj<bh;bj++) for(let bi=0;bi<bw;bi++){ let best=-1,bk=-1,sum=0,cnt=0;
       for(let j=bj*B;j<Math.min(H,(bj+1)*B);j++) for(let i=bi*B;i<Math.min(W,(bi+1)*B);i++){ const k=j*W+i; if(!this.pub[k]) continue; const v=L.score[k]; sum+=v;cnt++; if(v>best){best=v;bk=k;} }
       if(cnt<B*B*.3||bk<0) continue; if(this.dAny[bk]>walkMaxCells) continue; blocks.push({k:bk,v:best*.6+ (sum/cnt)*.4}); }
     blocks.sort((a,b)=>b.v-a.v); const picked=[]; const sup=Math.round(900/m);
-    for(const b of blocks){ const i=b.k%W,j=(b.k-i)/W; if(picked.some(p=>Math.hypot(p.i-i,p.j-j)<sup)) continue; picked.push({i,j,k:b.k,v:b.v}); if(picked.length>=Math.max(300,n*25)) break; }
+    for(const b of blocks){ const i=b.k%W,j=(b.k-i)/W; if(picked.some(p=>Math.hypot(p.i-i,p.j-j)<sup)) continue; picked.push({i,j,k:b.k,v:b.v}); if(picked.length>=(minWalkM?900:Math.max(300,n*25))) break; }
     const sp=SPECIES[L.opts.species]; const fr=Math.round(sp.foodR/m); const out=[];
     // Route every candidate first, then rank on habitat AND how you get in. A great bed you reach by
     // fighting a mile of blowdown is worth less than a good bed at the end of a gated road.
@@ -184,6 +185,7 @@ class Model {
     for(const p of picked){
       const rt=this.routeTo(p.i,p.j,Math.min(maxOffM,walkMaxM));
       if(!rt||rt.totalM>walkMaxM) continue;                       // no legal walk-in inside the cap
+      if(rt.totalM<minWalkM) continue;                            // too close to the truck to be worth it
       if(gatedOnly&&(rt.roadM<minRoadM||!/gated|closed/.test(rt.classes[0]||''))) continue;
       const accessFit=freeRoam?1:Math.exp(-rt.offM/450);
       cands.push({p,rt,rank:p.v*(.35+.65*accessFit),accessFit});

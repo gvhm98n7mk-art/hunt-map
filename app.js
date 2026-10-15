@@ -81,13 +81,15 @@ async function runPlan(){
   const c=Geo.centroid(S.gmu.geometry); S.wx=$('#useWx').checked?await Weather.forecast(c[1],c[0],$('#date').value):null;
   $('#wx').textContent=S.wx?`Forecast ${$('#date').value}: ${Math.round(S.wx.tmin)}–${Math.round(S.wx.tmax)}°F, ${S.wx.rain}" rain, wind ${Math.round(S.wx.wind)} mph. Sunrise ${S.wx.sunrise}, sunset ${S.wx.sunset}.`:'No forecast (date beyond 16 days or weather off): using mild, dry defaults.';
   say('Scoring…'); await tick(); const o=planOpts(); S.model.score(o);
-  S.spots=S.model.hotspots(12,{walkMaxKm:+$('#walk').value*1.609,access:$('#access').value,maxOffM:+$('#access').dataset.off||undefined}); drawHeat(); drawSpots(); renderResults(o); $('#gpx').disabled=!S.spots.length; btn.disabled=false;
+  S.spots=S.model.hotspots(12,{walkMaxKm:+$('#walk').value*1.609,access:$('#access').value,minWalkKm:+$('#walkMin').value*1.609,maxOffM:+$('#access').dataset.off||undefined}); drawHeat(); drawSpots(); renderResults(o); $('#gpx').disabled=!S.spots.length; btn.disabled=false;
   say(`<b>${S.gmuNum}</b> plan: pressure ${Math.round(o.pressureDay*100)}%, rut ${Math.round(S.model.last.rut*100)}%`);
 }
 function drawHeat(){ if(heatLayer){map.removeLayer(heatLayer);heatLayer=null;} if(!S.model?.last||heatKind==='none') return; const cv=S.model.paint(heatKind); heatLayer=L.imageOverlay(cv.toDataURL(),S.grid.bounds(),{opacity:.75,pane:'heat',interactive:false}).addTo(map); }
 function drawSpots(){ planLayer.clearLayers(); for(const s of S.spots){ L.marker(s.bed,{icon:L.divIcon({className:'',html:`<div class="numIcon">${s.rank}</div>`,iconSize:[22,22],iconAnchor:[11,11]}),pane:'pins'}).on('click',()=>selectSpot(s)).addTo(planLayer); } }
 function renderResults(o){ const el=$('#results'); const open=Regs.open(S.gmuNum,o.date,o.species,$('#weapon').value);
-  el.innerHTML=`<h2>Top spots for ${SPECIES[o.species].name.split(' /')[0]} · ${o.date}</h2>`+(open.length?'':`<div class="note bad">No ${o.species} general season open in ${S.gmuNum} on ${o.date}${$('#weapon').value?' for '+$('#weapon').value:''}. Scouting plan only.</div>`)+
+  const mn=+$('#walkMin').value, mx=+$('#walk').value;
+  const empty=!S.spots.length?`<div class="note bad"><b>No spots match these filters.</b><br>${mn>=mx?`Min walk (${mn} mi) is not below max walk (${mx} mi) — widen the max.`:`Nothing in ${S.gmuNum} has a legal walk-in between ${mn} and ${mx} mi${$('#access').value==='gated'?' that also runs at least 0.5 mi up a gated or abandoned road':''}. Try lowering the minimum, raising the maximum, or setting Access to "Walk in on a road".`}</div>`:'';
+  el.innerHTML=`<h2>Top spots for ${SPECIES[o.species].name.split(' /')[0]} · ${o.date}</h2>`+(open.length?'':`<div class="note bad">No ${o.species} general season open in ${S.gmuNum} on ${o.date}${$('#weapon').value?' for '+$('#weapon').value:''}. Scouting plan only.</div>`)+empty+
    S.spots.map(s=>`<div class="spot" data-r="${s.rank}"><span class="rk">${s.rank}</span><span>${s.slope}° ${s.aspect} face${s.bench?' · bench':''} · ${s.elev} ft</span><span class="sc">${s.score}</span><span class="meta">security ${s.sec} · pressure ${s.pressure} · ${(s.walkKm*.621).toFixed(1)} mi walk (${(s.roadWalkKm*.621).toFixed(1)} mi on ${ACCESS_WORD[s.access]||'road'}, ${Math.round(s.offM*1.094)} yd off)${s.foodFit?` · feed ${s.foodFit}`:''}</span><span class="bar"><i style="width:${s.score}%"></i></span></div>`).join('')+`<div id="detail"></div>`;
   $$('#results .spot').forEach(d=>d.onclick=()=>selectSpot(S.spots[+d.dataset.r-1])); }
 async function selectSpot(s){ $$('#results .spot').forEach(d=>d.classList.toggle('active',+d.dataset.r===s.rank)); map.setView(s.bed,14);
@@ -109,7 +111,7 @@ async function selectSpot(s){ $$('#results .spot').forEach(d=>d.classList.toggle
    ${th.map(t=>`<p>${t}</p>`).join('')}${drive}</div>`; }
 $('#run').onclick=runPlan; $('#clearPlan').onclick=()=>{planLayer.clearLayers();$('#results').innerHTML='';S.spots=[];if(heatLayer){map.removeLayer(heatLayer);heatLayer=null;}$('#gpx').disabled=true;};
 $('#gpx').onclick=()=>GPX.download(`GMU${S.gmuNum}_${$('#species').value}_${$('#date').value}`,GPX.build(`GMU ${S.gmuNum} ${$('#species').value} ${$('#date').value}`,S.spots,S.pins.filter(p=>p.gmu===S.gmuNum),null));
-$('#access').onchange=()=>{ if(S.spots.length) runPlan(); };
+$('#access').onchange=$('#walkMin').onchange=()=>{ if(S.spots.length) runPlan(); };
 // ---- regs & days ----
 function renderRegs(){ const g=S.gmuNum, date=$('#date').value; const rows=Regs.forGMU(g).sort((a,b)=>a.sp.localeCompare(b.sp)||a.s.localeCompare(b.s));
   const st=s=>date>=s.s&&date<=s.e?'<span class="pill open">OPEN</span>':(s.s>date&&(new Date(s.s)-new Date(date))/864e5<=21?`<span class="pill soon">in ${Math.ceil((new Date(s.s)-new Date(date))/864e5)} d</span>`:'<span class="pill closed">closed</span>');
