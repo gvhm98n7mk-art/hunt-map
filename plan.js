@@ -62,6 +62,9 @@ const GPX = {
       if(s.food) x+=`<wpt lat="${s.food[0]}" lon="${s.food[1]}"><name>#${s.rank} feed</name><sym>Flag, Green</sym></wpt>\n`;
       if(s.park) x+=`<wpt lat="${s.park[0]}" lon="${s.park[1]}"><name>#${s.rank} park</name><sym>Car</sym></wpt>\n`; }
     for(const p of pins) x+=`<wpt lat="${p.lat}" lon="${p.lng}"><name>${esc(p.kind)}: ${esc(p.note)}</name><time>${p.created_at}</time></wpt>\n`;
+    for(const s of spots){ if(!s.route||s.route.length<2) continue;
+      const leg=s.leave?[...s.route,s.bed]:s.route;
+      x+=`<trk><name>#${s.rank} walk-in ${s.walkKm!=null?(s.walkKm*.621).toFixed(1)+' mi':''}</name><trkseg>${leg.map(p=>`<trkpt lat="${p[0]}" lon="${p[1]}"/>`).join('')}</trkseg></trk>\n`; }
     if(route&&route.length) x+=`<rte><name>${esc(name)} approach</name>${route.map(p=>`<rtept lat="${p[0]}" lon="${p[1]}"/>`).join('')}</rte>\n`;
     return x+'</gpx>';
   },

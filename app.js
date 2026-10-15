@@ -46,6 +46,7 @@ async function loadGMU(num){
   }catch(e){ say(`<b style="color:var(--bad)">Error:</b> ${e.message}`); console.error(e); }
 }
 const tick=()=>new Promise(r=>setTimeout(r,30));
+const ACCESS_WORD={gated:'gated road',closed:'abandoned grade',trail:'trail',spur:'spur',mainline:'mainline',county:'county road',hwy:'highway'};
 const ROAD_LABEL={hwy:'Highway',county:'County / state road',mainline:'Mainline, open to vehicles',spur:'Spur, open to vehicles',gated:'Gated or private: walk / bike',closed:'Abandoned / closed: walk only',trail:'Trail',unknown:'Unknown access'};
 function drawRoads(){ // one merged layer per class: fast even with 16k segments
   OV.roads.clearLayers(); const by={};
@@ -74,36 +75,41 @@ function drawLayers(){
 }
 // ---- plan ----
 function planOpts(){ const date=$('#date').value; const species=$('#species').value; const p=$('#pressure').value; const pd=p==='auto'?Regs.pressureDay(S.gmuNum,date):+p;
-  return {species,date,tmaxF:S.wx?.tmax??58,rain:(S.wx?.rain??0)>.1,pressureDay:pd}; }
+  return {species,date,tmaxF:S.wx?.tmax??58,rain:(S.wx?.rain??0)>.1,pressureDay:pd,east:!!GMUS[S.gmuNum]?.east}; }
 async function runPlan(){
   if(!S.model){ say('Unit still loading'); return; } const btn=$('#run'); btn.disabled=true;
   const c=Geo.centroid(S.gmu.geometry); S.wx=$('#useWx').checked?await Weather.forecast(c[1],c[0],$('#date').value):null;
   $('#wx').textContent=S.wx?`Forecast ${$('#date').value}: ${Math.round(S.wx.tmin)}–${Math.round(S.wx.tmax)}°F, ${S.wx.rain}" rain, wind ${Math.round(S.wx.wind)} mph. Sunrise ${S.wx.sunrise}, sunset ${S.wx.sunset}.`:'No forecast (date beyond 16 days or weather off): using mild, dry defaults.';
   say('Scoring…'); await tick(); const o=planOpts(); S.model.score(o);
-  S.spots=S.model.hotspots(12,{walkMaxKm:+$('#walk').value*1.609}); drawHeat(); drawSpots(); renderResults(o); $('#gpx').disabled=!S.spots.length; btn.disabled=false;
+  S.spots=S.model.hotspots(12,{walkMaxKm:+$('#walk').value*1.609,access:$('#access').value}); drawHeat(); drawSpots(); renderResults(o); $('#gpx').disabled=!S.spots.length; btn.disabled=false;
   say(`<b>${S.gmuNum}</b> plan: pressure ${Math.round(o.pressureDay*100)}%, rut ${Math.round(S.model.last.rut*100)}%`);
 }
 function drawHeat(){ if(heatLayer){map.removeLayer(heatLayer);heatLayer=null;} if(!S.model?.last||heatKind==='none') return; const cv=S.model.paint(heatKind); heatLayer=L.imageOverlay(cv.toDataURL(),S.grid.bounds(),{opacity:.75,pane:'heat',interactive:false}).addTo(map); }
 function drawSpots(){ planLayer.clearLayers(); for(const s of S.spots){ L.marker(s.bed,{icon:L.divIcon({className:'',html:`<div class="numIcon">${s.rank}</div>`,iconSize:[22,22],iconAnchor:[11,11]}),pane:'pins'}).on('click',()=>selectSpot(s)).addTo(planLayer); } }
 function renderResults(o){ const el=$('#results'); const open=Regs.open(S.gmuNum,o.date,o.species,$('#weapon').value);
   el.innerHTML=`<h2>Top spots for ${SPECIES[o.species].name.split(' /')[0]} · ${o.date}</h2>`+(open.length?'':`<div class="note bad">No ${o.species} general season open in ${S.gmuNum} on ${o.date}${$('#weapon').value?' for '+$('#weapon').value:''}. Scouting plan only.</div>`)+
-   S.spots.map(s=>`<div class="spot" data-r="${s.rank}"><span class="rk">${s.rank}</span><span>${s.slope}° ${s.aspect} face${s.bench?' · bench':''} · ${s.elev} ft</span><span class="sc">${s.score}</span><span class="meta">security ${s.sec} · pressure ${s.pressure} · ${(s.roadKm*.621).toFixed(1)} mi off drivable road · ${(s.walkKm*.621).toFixed(1)} mi walk-in${s.foodFit?` · feed ${s.foodFit}`:''}</span><span class="bar"><i style="width:${s.score}%"></i></span></div>`).join('')+`<div id="detail"></div>`;
+   S.spots.map(s=>`<div class="spot" data-r="${s.rank}"><span class="rk">${s.rank}</span><span>${s.slope}° ${s.aspect} face${s.bench?' · bench':''} · ${s.elev} ft</span><span class="sc">${s.score}</span><span class="meta">security ${s.sec} · pressure ${s.pressure} · ${(s.walkKm*.621).toFixed(1)} mi walk (${(s.roadWalkKm*.621).toFixed(1)} mi on ${ACCESS_WORD[s.access]||'road'}, ${Math.round(s.offM*1.094)} yd off)${s.foodFit?` · feed ${s.foodFit}`:''}</span><span class="bar"><i style="width:${s.score}%"></i></span></div>`).join('')+`<div id="detail"></div>`;
   $$('#results .spot').forEach(d=>d.onclick=()=>selectSpot(S.spots[+d.dataset.r-1])); }
 async function selectSpot(s){ $$('#results .spot').forEach(d=>d.classList.toggle('active',+d.dataset.r===s.rank)); map.setView(s.bed,14);
   planLayer.eachLayer(l=>{ if(l._tmp) planLayer.removeLayer(l); });
   const add=l=>{l._tmp=true;l.addTo(planLayer);return l;};
   if(s.food) add(L.circleMarker(s.food,{radius:7,color:'#2f7d4f',fillColor:'#2f7d4f',fillOpacity:.8,pane:'pins'}).bindTooltip('feed'));
   if(s.park) add(L.circleMarker(s.park,{radius:7,color:'#2b6cb0',fillColor:'#fff',fillOpacity:1,pane:'pins'}).bindTooltip('park'));
-  const route=[s.park,s.bed].filter(Boolean); if(route.length===2) add(L.polyline(route,{color:'#111',dashArray:'4 6',weight:2,pane:'pins'}));
+  if(s.route&&s.route.length>1){ add(L.polyline(s.route,{color:'#fff',weight:6,opacity:.8,pane:'pins',interactive:false}));
+    add(L.polyline(s.route,{color:'#111',weight:3,opacity:.95,pane:'pins'}).bindTooltip(`${(s.roadWalkKm*.621).toFixed(1)} mi on ${ACCESS_WORD[s.access]||'road'}`)); }
+  if(s.leave) add(L.polyline([s.leave,s.bed],{color:'#111',dashArray:'3 5',weight:2.5,opacity:.9,pane:'pins'}).bindTooltip(`${Math.round(s.offM*1.094)} yd cross-country`));
+  if(s.leave) add(L.circleMarker(s.leave,{radius:5,color:'#111',fillColor:'#f5d76e',fillOpacity:1,pane:'pins'}).bindTooltip('leave the road here'));
   if(s.food) add(L.polyline([s.bed,s.food],{color:'#2f7d4f',dashArray:'2 6',weight:2,pane:'pins'}));
   const hrs=$('#hours').value; const th=Thermals.advice(hrs,s,S.wx);
   let drive=''; if(S.settings.home_lat){ const m=await Drive.minutes([S.settings.home_lat,S.settings.home_lng],s.park||s.bed); if(m) drive=`<p><b>Drive from home:</b> ~${Math.floor(m/60)}h ${m%60}m to the parking point.</p>`; }
   $('#detail').innerHTML=`<div class="detail"><p><b>#${s.rank} · score ${s.score}</b> · bed ${s.bed[0].toFixed(5)}, ${s.bed[1].toFixed(5)}</p>
-   <p>Bedding: ${s.slope}° slope, ${s.aspect} aspect, ${s.elev} ft${s.bench?', on a bench':''}. Security ${s.sec}/100, pressure ${s.pressure}/100. ${(s.roadKm*.621).toFixed(1)} mi from the nearest drivable road, ${(s.gateKm*.621).toFixed(1)} mi from the nearest gate.</p>
+   <p>Bedding: ${s.slope}° slope, ${s.aspect} aspect, ${s.elev} ft${s.bench?', on a bench':''}. Security ${s.sec}/100, pressure ${s.pressure}/100. ${(s.roadKm*.621).toFixed(1)} mi from the nearest drivable road.</p>
+   <p><b>Getting in:</b> park at ${s.park?`${s.park[0].toFixed(5)}, ${s.park[1].toFixed(5)}`:'the road end'}, where the drivable road stops. Walk <b>${(s.roadWalkKm*.621).toFixed(1)} mi</b> up the ${ACCESS_WORD[s.access]||'road'}${s.accessName?` (${s.accessName})`:''}, then leave the road at ${s.leave?`${s.leave[0].toFixed(5)}, ${s.leave[1].toFixed(5)}`:'the closest bend'} and cut <b>${Math.round(s.offM*1.094)} yd</b> cross-country to the bed. Total ${(s.walkKm*.621).toFixed(1)} mi each way${s.gateKm<9?`; nearest mapped gate is ${(s.gateKm*.621).toFixed(1)} mi away`:''}.</p>
    ${s.food?`<p>Nearest feed: harvest unit ${(Geo.km([s.bed[1],s.bed[0]],[s.food[1],s.food[0]])*.621).toFixed(1)} mi away (fit ${s.foodFit}/100). Expect the bed-to-feed line to cross benches and the timber edge; sign will be on that edge.</p>`:'<p>No aged harvest unit within range; feed is riparian brush or older cuts.</p>'}
    ${th.map(t=>`<p>${t}</p>`).join('')}${drive}</div>`; }
 $('#run').onclick=runPlan; $('#clearPlan').onclick=()=>{planLayer.clearLayers();$('#results').innerHTML='';S.spots=[];if(heatLayer){map.removeLayer(heatLayer);heatLayer=null;}$('#gpx').disabled=true;};
 $('#gpx').onclick=()=>GPX.download(`GMU${S.gmuNum}_${$('#species').value}_${$('#date').value}`,GPX.build(`GMU ${S.gmuNum} ${$('#species').value} ${$('#date').value}`,S.spots,S.pins.filter(p=>p.gmu===S.gmuNum),null));
+$('#access').onchange=()=>{ if(S.spots.length) runPlan(); };
 // ---- regs & days ----
 function renderRegs(){ const g=S.gmuNum, date=$('#date').value; const rows=Regs.forGMU(g).sort((a,b)=>a.sp.localeCompare(b.sp)||a.s.localeCompare(b.s));
   const st=s=>date>=s.s&&date<=s.e?'<span class="pill open">OPEN</span>':(s.s>date&&(new Date(s.s)-new Date(date))/864e5<=21?`<span class="pill soon">in ${Math.ceil((new Date(s.s)-new Date(date))/864e5)} d</span>`:'<span class="pill closed">closed</span>');
@@ -112,7 +118,7 @@ function renderRegs(){ const g=S.gmuNum, date=$('#date').value; const rows=Regs.
    <table><tr><th>Species</th><th>Weapon</th><th>Dates</th><th>Legal</th><th></th></tr>${rows.map(s=>`<tr><td>${Regs.label(s.sp)}</td><td>${s.w} ${s.ph}</td><td class="num">${f(s.s)}–${f(s.e)}</td><td>${s.legal}${s.notes.length?`<br><small>${s.notes.join('; ')}</small>`:''}</td><td>${st(s)}</td></tr>`).join('')}</table>`;
   const now=Regs.open(g,date,$('#species').value,$('#weapon').value); $('#openNow').innerHTML=now.length?`<b>Open ${date}:</b> ${now.map(s=>`${Regs.label(s.sp)} ${s.w} (${s.legal})`).join(' · ')}`:`<b>Nothing open</b> for ${$('#species').value}${$('#weapon').value?' / '+$('#weapon').value:''} in ${g} on ${date}.`; $('#openNow').className='note'+(now.length?'':' bad'); }
 async function renderDays(){ await Cal.load(); const g=S.gmuNum; const days=Cal.bestDays(g,$('#species').value,$('#weapon').value);
-  $('#tab-days').innerHTML=`<h2>Best days · next 75 · GMU ${g}</h2><div class="hint">${Cal.events.length?`${Cal.events.length} calendar events loaded. Shift days score near zero.`:'No calendar loaded yet (data/calendar.json). Days are ranked on season pressure and rut only.'}</div>`+
+  $('#tab-days').innerHTML=`<h2>Best days · next 75 · GMU ${g}</h2><div class="hint">${Cal.events.length?`${Cal.events.length} calendar events loaded. Shift days score near zero.`:'No calendar loaded yet (calendar.json). Days are ranked on season pressure and rut only.'}</div>`+
    (days.length?days.slice(0,25).map(d=>`<div class="day"><span class="d">${d.dow} ${d.date.slice(5)}</span><span>${d.open}</span><span class="sc">${Math.round(d.score*100)}</span><span class="m">pressure ${Math.round(d.pressure*100)}% · rut ${Math.round(d.rut*100)}%${d.shift?' · <b>on shift</b>':''}${d.other.length?' · '+d.other.join(', '):''}</span></div>`).join(''):'<div class="hint">No open seasons in the window.</div>'); }
 // ---- pins & log ----
 const KINDS=[['sign','#d9631e'],['bed','#7a1f0c'],['wallow','#3b82c4'],['sighting','#2f7d4f'],['kill','#111'],['camp','#6b5b95'],['glass','#b8860b'],['gate','#8a8a8a']];
