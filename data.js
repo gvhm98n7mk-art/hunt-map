@@ -3,6 +3,7 @@ const SVC = {
   gmu: "https://geodataservices.wdfw.wa.gov/arcgis/rest/services/MapServices/HOReferenceService/MapServer/0",
   dnr: "https://gis.dnr.wa.gov/site3/rest/services/Public_Boundaries/WADNR_PUBLIC_Cadastre_OpenData/MapServer/6",
   pad: "https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/Manager_Name_PADUS/FeatureServer/0",
+  facts: "https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_TimberHarvest_01/MapServer/",
   fpa: "https://gis.dnr.wa.gov/site2/rest/services/Public_Forest_Practices/Forest_Practices_Applications_offline/FeatureServer/6",
   dnrRoads: "https://gis.dnr.wa.gov/site2/rest/services/Public_Forest_Practices/WADNR_PUBLIC_FP_Trans/FeatureServer/2",
   overpass: ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://overpass.private.coffee/api/interpreter"],
@@ -88,6 +89,26 @@ const Data = {
       const lines=x.geometry.type==='LineString'?[x.geometry.coordinates]:x.geometry.type==='MultiLineString'?x.geometry.coordinates:[];
       for(const c of lines) out.push({ll:c.map(p=>[p[1],p[0]]),cls,src:'DNR',name:a.ROAD_NM||a.ROAD_NO||'',surface:a.ROAD_SURFACE_LBL||'',access:a.ROAD_PUBLIC_ACCESS_LBL||'',control:a.ROAD_CONTROL_LBL||'',status:a.ROAD_STATUS_LBL||'',hasGate:/Gated/.test(a.ROAD_PUBLIC_ACCESS_LBL||'')}); }
     return out;
+  },
+  // Federal timber harvest (USFS FACTS). Federal logging is not permitted through the state Forest
+  // Practices system, so without this every national forest reads as untouched mature timber and
+  // scores near zero for forage. The "All Years" layer errors out; the decade layers work.
+  // On the west side most federal activity is commercial thinning, not clearcutting, so the
+  // treatment type is carried through and the model treats the two differently.
+  async fedCuts(gmu){
+    const B=SVC.facts, out=[];
+    await Promise.all([11,0,1,2].map(async L=>{
+      try{ const f=await arcAll(B+L,"fy_completed >= 1985",gmu.bbox,"fy_completed,treatment_type,gis_acres");
+        out.push(...f);
+      }catch(e){ console.warn('FACTS layer '+L,e.message); }
+    }));
+    return out.flatMap(Geo.splitMulti).filter(x=>Geo.overlapsUnit(x.geometry,gmu)).map(x=>{
+      const p=x.properties, t=(p.treatment_type||'').toLowerCase();
+      p.year=p.fy_completed||0;
+      p.thin=/thin|sanitation|salvage|improvement/.test(t);
+      p.TIMHARV_FP_TY_LABEL_NM=(p.treatment_type||'Federal harvest')+(p.thin?' (thin)':'');
+      p.TIMHARV_RPT_AREA=p.gis_acres; p.src='USFS';
+      return x; }).filter(x=>x.properties.year>=1985);
   },
   // Roads classified for pressure. Returns {roads:[{ll,cls,tags}], gates:[[lat,lon]], rivers:[ll]}
   async osm(gmu){

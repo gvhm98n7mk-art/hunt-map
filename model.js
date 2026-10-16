@@ -12,6 +12,10 @@ const SPECIES = {
 };
 // Cover quality from stand age. For elk the hide is mature timber. For deer it is 5-20 yr replant,
 // which is a wall you cannot see fifteen feet into; old growth is open underneath and poor security.
+// A commercial thin is not a clearcut. The overstory stays, so cover stays good, while the opened
+// canopy pushes salal, huckleberry and forbs for roughly a decade. On westside federal ground this
+// is the dominant treatment, so it is modelled separately instead of being lumped with clearcuts.
+function thinForage(a){ return a<=1?.25 : a<=3?.5 : a<=15?.7 : a<=25?.5 : .3; }
 function coverFit(a, sp){
   if(!sp.coverFirst) return a===255?1:Math.min(1,a/15);
   if(a===255) return .55;
@@ -43,8 +47,10 @@ class Model {
     this.pub=new Uint8Array(N);
     for(const f of layers.public){ const polys=f.geometry.type==='Polygon'?[f.geometry.coordinates]:f.geometry.coordinates; for(const rs of polys) Raster.fillPolygon(this.pub,W,H,rs.map(r=>r.map(p=>grid.toIJ(p[0],p[1])))); }
     // cuts: age raster (years since approval, 255 = none)
-    this.cutYear=new Uint16Array(N); // 0 = no even-aged harvest on record
-    for(const f of [...layers.cuts].sort((a,b)=>a.properties.year-b.properties.year)){ const rs=f.geometry.coordinates.map(r=>r.map(p=>grid.toIJ(p[0],p[1]))); Raster.fillPolygon(this.cutYear,W,H,rs,f.properties.year); }
+    this.cutYear=new Uint16Array(N); // 0 = no harvest on record
+    this.cutThin=new Uint8Array(N);  // 1 = thinned, overstory retained
+    for(const f of [...layers.cuts].sort((a,b)=>a.properties.year-b.properties.year)){ const rs=f.geometry.coordinates.map(r=>r.map(p=>grid.toIJ(p[0],p[1])));
+      Raster.fillPolygon(this.cutYear,W,H,rs,f.properties.year); Raster.fillPolygon(this.cutThin,W,H,rs,f.properties.thin?1:0); }
     // Unknown-owner roads: open spur if on public land, otherwise private/gated (permit or walk-in)
     for(const r of layers.roads){ if(r.cls!=='unknown') continue; const p=r.ll[Math.floor(r.ll.length/2)]; const [i,j]=grid.toIJ(p[1],p[0]); r.cls=(i>=0&&j>=0&&i<W&&j<H&&this.pub[j*W+i])?'spur':'gated'; if(r.cls==='gated') r.control=r.control&&r.control!=='Unknown'?r.control:'Private (inferred)'; }
     // roads by pressure class, drivable vs walk
@@ -119,7 +125,10 @@ class Model {
     const hot=opts.tmaxF>=65, cold=opts.tmaxF<=40||opts.rain;
     const rut=rutFactor(opts.species,opts.date);
     const food=new Float32Array(N), cover=new Float32Array(N);
-    for(let k=0;k<N;k++){ const a=this.ageAt(k,yr); food[k]=a===255?0:(sp.ageFit[Math.min(a,15)]??0.1); cover[k]=coverFit(a,sp); }
+    for(let k=0;k<N;k++){ const a=this.ageAt(k,yr), th=this.cutThin[k];
+      if(a===255){ food[k]=0; cover[k]=coverFit(255,sp); }
+      else if(th){ food[k]=thinForage(a); cover[k]=sp.coverFirst?Math.max(.8,coverFit(a,sp)):Math.min(1,.6+a/20); }
+      else { food[k]=sp.ageFit[Math.min(a,15)]??0.1; cover[k]=coverFit(a,sp); } }
     // Food: elk will use the middle of a cut. Deer feed on the cut edge and bed in the cover behind it,
     // so for deer the forage term is distance to a feed-edge, not distance to a cut.
     let foodNear;

@@ -31,17 +31,18 @@ async function loadGMU(num){
     if(S.cache[num]){ Object.assign(S,S.cache[num]); drawLayers(); map.fitBounds(L.geoJSON(S.gmu).getBounds()); renderAll(); say(`<b>${num} ${GMUS[num].name}</b> ready`); return; }
     say(`Loading GMU ${num} boundary…`); const gmu=await Data.gmu(num); S.gmu=gmu; map.fitBounds(L.geoJSON(gmu).getBounds());
     say('Loading public land, harvest units, roads…'); S.osmErr=null;
-    const [dnr,pad,cuts,osm,dnrRoads]=await Promise.all([Data.dnr(gmu),Data.pad(gmu),Data.cuts(gmu),Data.osm(gmu).catch(e=>{console.warn('OSM',e);S.osmErr=e.message;return {roads:[],gates:[],rivers:[]};}),Data.dnrRoads(gmu).catch(e=>{console.warn('DNR roads',e);return [];})]);
+    const [dnr,pad,cutsState,osm,dnrRoads,cutsFed]=await Promise.all([Data.dnr(gmu),Data.pad(gmu),Data.cuts(gmu),Data.osm(gmu).catch(e=>{console.warn('OSM',e);S.osmErr=e.message;return {roads:[],gates:[],rivers:[]};}),Data.dnrRoads(gmu).catch(e=>{console.warn('DNR roads',e);return [];}),Data.fedCuts(gmu).catch(e=>{console.warn('FACTS',e);return [];})]);
+    const cuts=[...cutsState,...cutsFed];
     // DNR is the primary road source (every forest road incl. private timber spurs); OSM fills highways, county roads and trails, or everything if DNR is down.
     const roads=dnrRoads.length?[...osm.roads.filter(r=>/hwy|county|trail/.test(r.cls)),...dnrRoads]:osm.roads;
-    S.layers={public:[...dnr,...pad.filter(f=>f.properties.access==='open')],dnr,pad,cuts,...osm,roads,roadSrc:dnrRoads.length?'DNR':'OSM'};
+    S.layers={public:[...dnr,...pad.filter(f=>f.properties.access==='open'||f.properties.access==='restricted')],dnr,pad,cuts,...osm,roads,roadSrc:dnrRoads.length?'DNR':'OSM'};
     drawLayers(); renderRegs(); renderDays();
     const grid=Grid.forBbox(gmu.bbox,CONFIG.DEM_ZOOM); S.grid=grid;
     say(`Loading terrain (${grid.W/256}×${grid.H/256} tiles)…`); S.elev=await Terrain.load(grid,(d,n)=>say(`Terrain ${d}/${n}`)); S.layers.elev=S.elev;
     say('Computing slope, aspect, benches…'); await tick(); S.terr=Terrain.derive(grid,S.elev);
     say('Building pressure and habitat rasters…'); await tick(); S.model=new Model(grid,S.terr,S.layers);
     drawRoads(); S.cache[num]={gmu:S.gmu,layers:S.layers,grid:S.grid,elev:S.elev,terr:S.terr,model:S.model};
-    say(`<b>${num} ${GMUS[num].name}</b> ready · ${S.layers.roads.length} road segments (${S.layers.roadSrc}) · ${cuts.length} harvest units · ${osm.gates.length} gates${S.osmErr?' · <span style="color:var(--bad)">OSM down: no trails/gates/rivers this load</span>':''}`);
+    say(`<b>${num} ${GMUS[num].name}</b> ready · ${S.layers.roads.length} road segments (${S.layers.roadSrc}) · ${cuts.length} harvest units (${cutsFed.length} federal) · ${osm.gates.length} gates${S.osmErr?' · <span style="color:var(--bad)">OSM down: no trails/gates/rivers this load</span>':''}`);
     renderAll();
   }catch(e){ say(`<b style="color:var(--bad)">Error:</b> ${e.message}`); console.error(e); }
 }
