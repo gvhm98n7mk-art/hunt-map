@@ -13,6 +13,21 @@ const Geo = {
   pipRing(x,y,r){ let inside=false; for(let i=0,j=r.length-1;i<r.length;j=i++){ const xi=r[i][0],yi=r[i][1],xj=r[j][0],yj=r[j][1]; if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside; } return inside; },
   pip(x,y,g){ const polys=g.type==='Polygon'?[g.coordinates]:g.coordinates; return polys.some(rs=>this.pipRing(x,y,rs[0]) && !rs.slice(1).some(h=>this.pipRing(x,y,h))); },
   bbox(g){ let W=180,S=90,E=-180,N=-90; const walk=c=>{ if(typeof c[0]==='number'){ if(c[0]<W)W=c[0]; if(c[0]>E)E=c[0]; if(c[1]<S)S=c[1]; if(c[1]>N)N=c[1]; } else c.forEach(walk); }; walk(g.coordinates); return [W,S,E,N]; },
+  // Does this polygon actually overlap the unit? The old test used the polygon's centroid, which
+  // threw away every large or concave shape whose middle falls outside the GMU. That silently
+  // deleted most of Olympic National Forest from GMU 621 (49% public instead of the real 74%).
+  overlapsUnit(g, gmu){
+    const b=this.bbox(g), gb=gmu.bbox||this.bbox(gmu.geometry);
+    if(b[2]<gb[0]||b[0]>gb[2]||b[3]<gb[1]||b[1]>gb[3]) return false;
+    const ring=g.type==='Polygon'?g.coordinates[0]:g.coordinates[0][0];
+    const st=Math.max(1,Math.floor(ring.length/48));
+    for(let i=0;i<ring.length;i+=st) if(this.pip(ring[i][0],ring[i][1],gmu.geometry)) return true;
+    const c=this.centroid(g); if(this.pip(c[0],c[1],gmu.geometry)) return true;
+    const gr=gmu.geometry.type==='Polygon'?gmu.geometry.coordinates[0]:gmu.geometry.coordinates[0][0];
+    const st2=Math.max(1,Math.floor(gr.length/48));
+    for(let i=0;i<gr.length;i+=st2) if(this.pip(gr[i][0],gr[i][1],g)) return true;
+    return false;
+  },
   splitMulti(f){ if(f.geometry.type!=='MultiPolygon') return [f]; return f.geometry.coordinates.map(c=>({type:'Feature',properties:f.properties,geometry:{type:'Polygon',coordinates:c}})); },
   km(a,b){ const dy=(a[1]-b[1])*111.32, dx=(a[0]-b[0])*111.32*Math.cos((a[1]+b[1])/2*Math.PI/180); return Math.hypot(dx,dy); }
 };
@@ -56,15 +71,15 @@ const Data = {
   },
   async dnr(gmu){
     const f=await arcAll(SVC.dnr,"SURFACE_RIGHTS_FLG='Y'",gmu.bbox,"SURFACE_TRUST_CD");
-    return f.flatMap(Geo.splitMulti).filter(x=>{const c=Geo.centroid(x.geometry);return Geo.pip(c[0],c[1],gmu.geometry)}).map(x=>(x.properties.owner='DNR state trust',x.properties.access='open',x));
+    return f.flatMap(Geo.splitMulti).filter(x=>Geo.overlapsUnit(x.geometry,gmu)).map(x=>(x.properties.owner='DNR state trust',x.properties.access='open',x));
   },
   async pad(gmu){
     const f=await arcAll(SVC.pad,"Mang_Type<>'PVT' AND Mang_Type<>'SDNR' AND Pub_Access IN ('OA','RA') AND GIS_Acres>10",gmu.bbox,"Unit_Nm,Mang_Name,Mang_Type,Pub_Access,GIS_Acres");
-    return f.flatMap(Geo.splitMulti).filter(x=>{const c=Geo.centroid(x.geometry);return Geo.pip(c[0],c[1],gmu.geometry)}).map(x=>(x.properties.owner=x.properties.Mang_Name||x.properties.Mang_Type,x.properties.access=x.properties.Pub_Access==='OA'?'open':'restricted',x));
+    return f.flatMap(Geo.splitMulti).filter(x=>Geo.overlapsUnit(x.geometry,gmu)).map(x=>(x.properties.owner=x.properties.Mang_Name||x.properties.Mang_Type,x.properties.access=x.properties.Pub_Access==='OA'?'open':'restricted',x));
   },
   async cuts(gmu){
     const f=await arcAll(SVC.fpa,"TIMHARV_FP_TY_LABEL_NM LIKE 'Even%' AND DECISION IN ('Approved','Expired','Renewed','Closed') AND EFFECTIVE_DT > DATE '2004-01-01'",gmu.bbox,"FP_ID,EFFECTIVE_DT,TIMHARV_RPT_AREA,TIMHARV_FP_TY_LABEL_NM,DECISION");
-    return f.flatMap(Geo.splitMulti).filter(x=>{const c=Geo.centroid(x.geometry);return Geo.pip(c[0],c[1],gmu.geometry)}).map(x=>(x.properties.year=new Date(x.properties.EFFECTIVE_DT).getUTCFullYear(),x));
+    return f.flatMap(Geo.splitMulti).filter(x=>Geo.overlapsUnit(x.geometry,gmu)).map(x=>(x.properties.year=new Date(x.properties.EFFECTIVE_DT).getUTCFullYear(),x));
   },
   async dnrRoads(gmu){
     const f=await arcAllParallel(SVC.dnrRoads,"ROAD_STATUS_LBL<>'Planned'",gmu.bbox,"ROAD_NM,ROAD_NO,ROAD_STATUS_LBL,ROAD_PUBLIC_ACCESS_LBL,ROAD_CONTROL_LBL,ROAD_DNR_CLASS_LBL,ROAD_USGS_CLASS_LBL,ROAD_SURFACE_LBL");
