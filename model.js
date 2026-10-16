@@ -93,10 +93,12 @@ class Model {
       for(let dj=-1;dj<=1&&!touch;dj++) for(let di=-1;di<=1;di++){ const x=i+di,y=j+dj; if(x<0||y<0||x>=W||y>=H) continue; if(drive[y*W+x]){touch=true;break;} }
       if(touch){ dist[k]=0; prev[k]=-2; heap.push(k,0); } }
     const diag=m*Math.SQRT2;
+    // 1 mm epsilon below: dist is float32, and without it near-ties let neighbouring cells
+    // re-improve each other by fractions of a millimetre forever (12M heap pushes vs 192k).
     while(heap.size){ const [k,d]=heap.pop(); if(d>dist[k]) continue; const i=k%W, j=(k-i)/W;
       for(let dj=-1;dj<=1;dj++) for(let di=-1;di<=1;di++){ if(!di&&!dj) continue; const x=i+di,y=j+dj; if(x<0||y<0||x>=W||y>=H) continue;
         const k2=y*W+x; if(!walk[k2]) continue; const nd=d+(di&&dj?diag:m)*(wc[k2]||1);
-        if(nd<dist[k2]){ dist[k2]=nd; prev[k2]=k; heap.push(k2,dist[k2]); } } } // push the stored float32, not the double, or the pop guard discards it
+        if(nd<dist[k2]-0.001){ dist[k2]=nd; prev[k2]=k; heap.push(k2,dist[k2]); } } } // push the stored float32, not the double, or the pop guard discards it
     this.walk={mask:walk,drive,dist,prev,rIdx};
   }
   // Route from a bedding cell back to the truck: cross-country to the nearest reachable walk road,
