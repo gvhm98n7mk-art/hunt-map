@@ -3,6 +3,7 @@ const SVC = {
   gmu: "https://geodataservices.wdfw.wa.gov/arcgis/rest/services/MapServices/HOReferenceService/MapServer/0",
   dnr: "https://gis.dnr.wa.gov/site3/rest/services/Public_Boundaries/WADNR_PUBLIC_Cadastre_OpenData/MapServer/6",
   pad: "https://services.arcgis.com/v01gqwM5QqNysAAi/arcgis/rest/services/Manager_Name_PADUS/FeatureServer/0",
+  nlcd: "https://www.mrlc.gov/geoserver/mrlc_download/wms",
   facts: "https://apps.fs.usda.gov/arcx/rest/services/EDW/EDW_TimberHarvest_01/MapServer/",
   fpa: "https://gis.dnr.wa.gov/site2/rest/services/Public_Forest_Practices/Forest_Practices_Applications_offline/FeatureServer/6",
   dnrRoads: "https://gis.dnr.wa.gov/site2/rest/services/Public_Forest_Practices/WADNR_PUBLIC_FP_Trans/FeatureServer/2",
@@ -88,6 +89,34 @@ const Data = {
     for(const x of f){ const a=x.properties, cls=dnrRoadClass(a); if(!cls||!x.geometry) continue;
       const lines=x.geometry.type==='LineString'?[x.geometry.coordinates]:x.geometry.type==='MultiLineString'?x.geometry.coordinates:[];
       for(const c of lines) out.push({ll:c.map(p=>[p[1],p[0]]),cls,src:'DNR',name:a.ROAD_NM||a.ROAD_NO||'',surface:a.ROAD_SURFACE_LBL||'',access:a.ROAD_PUBLIC_ACCESS_LBL||'',control:a.ROAD_CONTROL_LBL||'',status:a.ROAD_STATUS_LBL||'',hasGate:/Gated/.test(a.ROAD_PUBLIC_ACCESS_LBL||'')}); }
+    return out;
+  },
+  // NLCD land cover, read at the model grid's own resolution. The harvest layers only know where
+  // somebody filed paperwork. This sees the ground itself, so avalanche chutes, meadows, river
+  // brush, burns, blowdown and regrowing cuts all count, on any ownership. On the west side
+  // Shrub/Scrub is almost always forest coming back after disturbance: prime blacktail cover AND feed.
+  async landcover(grid, onProgress){
+    const {W,H,x0,y0,n}=grid; const out=new Uint8Array(W*H);
+    const world=40075016.686, shift=world/2, res=world/(256*n);
+    const PAL={11:[70,107,159],12:[209,222,248],21:[222,197,197],22:[217,146,130],23:[235,0,0],24:[171,0,0],31:[179,172,159],41:[104,171,95],42:[28,95,44],43:[181,197,143],52:[204,184,121],71:[223,223,194],81:[220,217,57],82:[171,108,40],90:[184,217,235],95:[108,159,184]};
+    const codes=Object.keys(PAL).map(Number), cache=new Map();
+    const cls=(r,g,b)=>{ const k=(r<<16)|(g<<8)|b; let v=cache.get(k); if(v!==undefined) return v;
+      let best=0,bd=1e9; for(const c of codes){ const q=PAL[c]; const d=(q[0]-r)**2+(q[1]-g)**2+(q[2]-b)**2; if(d<bd){bd=d;best=c;} }
+      if(bd>1200) best=0; cache.set(k,best); return best; };
+    const TS=1024, cv=document.createElement('canvas'), ctx=cv.getContext('2d',{willReadFrequently:true});
+    const jobs=[]; for(let ty=0;ty<H;ty+=TS) for(let tx=0;tx<W;tx+=TS) jobs.push([tx,ty]);
+    let done=0;
+    const run=async([tx,ty])=>{
+      const w=Math.min(TS,W-tx), h=Math.min(TS,H-ty);
+      const gx=x0*256+tx, gy=y0*256+ty;
+      const minX=gx*res-shift, maxX=(gx+w)*res-shift, maxY=shift-gy*res, minY=shift-(gy+h)*res;
+      const u=`${SVC.nlcd}?service=WMS&version=1.1.1&request=GetMap&layers=NLCD_2021_Land_Cover_L48&styles=&bbox=${minX},${minY},${maxX},${maxY}&width=${w}&height=${h}&srs=EPSG:3857&format=image/png`;
+      const img=await new Promise((ok,bad)=>{const i=new Image();i.crossOrigin='anonymous';i.onload=()=>ok(i);i.onerror=()=>bad(new Error('NLCD tile'));i.src=u;});
+      cv.width=w; cv.height=h; ctx.drawImage(img,0,0); const d=ctx.getImageData(0,0,w,h).data;
+      for(let j=0;j<h;j++){ const row=(ty+j)*W+tx; for(let i=0;i<w;i++){ const o=(j*w+i)*4; out[row+i]=d[o+3]<128?0:cls(d[o],d[o+1],d[o+2]); } }
+      onProgress&&onProgress(++done,jobs.length);
+    };
+    for(let i=0;i<jobs.length;i+=4) await Promise.all(jobs.slice(i,i+4).map(run));
     return out;
   },
   // Federal timber harvest (USFS FACTS). Federal logging is not permitted through the state Forest

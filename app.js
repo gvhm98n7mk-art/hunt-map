@@ -39,10 +39,11 @@ async function loadGMU(num){
     drawLayers(); renderRegs(); renderDays();
     const grid=Grid.forBbox(gmu.bbox,CONFIG.DEM_ZOOM); S.grid=grid;
     say(`Loading terrain (${grid.W/256}×${grid.H/256} tiles)…`); S.elev=await Terrain.load(grid,(d,n)=>say(`Terrain ${d}/${n}`)); S.layers.elev=S.elev;
+    say('Reading land cover…'); S.layers.lc=await Data.landcover(grid,(d,n)=>say(`Land cover ${d}/${n}`)).catch(e=>{console.warn('NLCD',e);return null;});
     say('Computing slope, aspect, benches…'); await tick(); S.terr=Terrain.derive(grid,S.elev);
     say('Building pressure and habitat rasters…'); await tick(); S.model=new Model(grid,S.terr,S.layers);
     drawRoads(); S.cache[num]={gmu:S.gmu,layers:S.layers,grid:S.grid,elev:S.elev,terr:S.terr,model:S.model};
-    say(`<b>${num} ${GMUS[num].name}</b> ready · ${S.layers.roads.length} road segments (${S.layers.roadSrc}) · ${cuts.length} harvest units (${cutsFed.length} federal) · ${osm.gates.length} gates${S.osmErr?' · <span style="color:var(--bad)">OSM down: no trails/gates/rivers this load</span>':''}`);
+    say(`<b>${num} ${GMUS[num].name}</b> ready · ${S.layers.roads.length} road segments (${S.layers.roadSrc}) · ${cuts.length} harvest units (${cutsFed.length} federal)${S.layers.lc?'':' · <span style="color:var(--bad)">land cover unavailable</span>'} · ${osm.gates.length} gates${S.osmErr?' · <span style="color:var(--bad)">OSM down: no trails/gates/rivers this load</span>':''}`);
     renderAll();
   }catch(e){ say(`<b style="color:var(--bad)">Error:</b> ${e.message}`); console.error(e); }
 }

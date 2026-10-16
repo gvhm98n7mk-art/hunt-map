@@ -15,6 +15,10 @@ const SPECIES = {
 // A commercial thin is not a clearcut. The overstory stays, so cover stays good, while the opened
 // canopy pushes salal, huckleberry and forbs for roughly a decade. On westside federal ground this
 // is the dominant treatment, so it is modelled separately instead of being lumped with clearcuts.
+// What the ground itself says, independent of any harvest record.
+// Westside Shrub/Scrub is disturbed forest coming back: the thick stuff deer bed in and feed on.
+const LC_FORAGE={52:.9,71:1,81:.9,82:.7,95:.8,90:.7,41:.6,43:.5,31:.15};
+const LC_COVER ={52:1,90:.9,43:.85,41:.8,71:.25,81:.2,95:.2,31:.05};
 function thinForage(a){ return a<=1?.25 : a<=3?.5 : a<=15?.7 : a<=25?.5 : .3; }
 function coverFit(a, sp){
   if(!sp.coverFirst) return a===255?1:Math.min(1,a/15);
@@ -129,6 +133,12 @@ class Model {
       if(a===255){ food[k]=0; cover[k]=coverFit(255,sp); }
       else if(th){ food[k]=thinForage(a); cover[k]=sp.coverFirst?Math.max(.8,coverFit(a,sp)):Math.min(1,.6+a/20); }
       else { food[k]=sp.ageFit[Math.min(a,15)]??0.1; cover[k]=coverFit(a,sp); } }
+    // Land cover overrides upward: a shrub field is feed and cover whether or not anyone logged it.
+    const lc=this.layers.lc;
+    if(lc) for(let k=0;k<N;k++){ const c=lc[k]; if(!c) continue;
+      const lf=LC_FORAGE[c]; if(lf!==undefined&&lf>food[k]) food[k]=lf;
+      if(sp.coverFirst){ const lv=LC_COVER[c]; if(lv!==undefined&&lv>cover[k]) cover[k]=lv; }
+      if(c===11){ food[k]=0; cover[k]=0; } }
     // Food: elk will use the middle of a cut. Deer feed on the cut edge and bed in the cover behind it,
     // so for deer the forage term is distance to a feed-edge, not distance to a cut.
     let foodNear;
@@ -170,6 +180,7 @@ class Model {
     const wr=Math.round(sp.waterR/m);
     for(let k=0;k<N;k++){
       const water=Math.exp(-this.dWater[k]/wr);
+      if(lc&&lc[k]===11){ out[k]=0; continue; }   // open water is not a bedding site
       const v=Math.pow(sec[k],sp.wSec)*( (1-wFood-wWater) + wFood*foodNear[k] + wWater*water );
       out[k]=this.pub[k]?v:v*.35;
     }
