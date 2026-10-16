@@ -127,7 +127,7 @@ const Data = {
   async fedCuts(gmu){
     const B=SVC.facts, out=[];
     await Promise.all([11,0,1,2].map(async L=>{
-      try{ const f=await arcAll(B+L,"fy_completed >= 1985",gmu.bbox,"fy_completed,treatment_type,gis_acres");
+      try{ const f=await arcAll(B+L,"1=1",gmu.bbox,"fy_completed,treatment_type,gis_acres"); // the service errors on a fy_completed filter; the decade layers already bound the years
         out.push(...f);
       }catch(e){ console.warn('FACTS layer '+L,e.message); }
     }));
